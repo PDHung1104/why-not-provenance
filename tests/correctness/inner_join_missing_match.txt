@@ -1,0 +1,5 @@
+SELECT t1.src, t2.dst
+FROM Train t1
+JOIN Train t2 ON t1.dst = t2.src;
+
+WHYNOT Q(s,n)

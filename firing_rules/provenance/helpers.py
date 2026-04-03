@@ -17,7 +17,9 @@ def strip_quotes(value: str) -> str:
 
 
 def is_variable(term: str) -> bool:
-    return len(term) > 0 and term[0].isupper()
+    # Variables are represented in ALL_CAPS style (e.g., X, Y, W_W_CITY).
+    # This avoids misclassifying string literals like "Singapore" as variables.
+    return re.fullmatch(r"[A-Z_][A-Z0-9_]*", term) is not None
 
 
 def split_top_level(s: str, delimiter: str) -> List[str]:

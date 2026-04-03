@@ -1,0 +1,7 @@
+SELECT w.w_id, i.i_id
+FROM warehouses w
+JOIN stocks s ON s.w_id = w.w_id
+JOIN items i ON i.i_id = s.i_id
+WHERE w.w_city = 'Singapore' AND i.i_price > 95;
+
+WHYNOT Q(22,10)

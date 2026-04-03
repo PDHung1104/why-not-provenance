@@ -1,0 +1,5 @@
+SELECT w.w_id, w.w_street
+FROM warehouses w
+WHERE w.w_city = 'Singapore';
+
+WHYNOT Q('301','Sunbrook')

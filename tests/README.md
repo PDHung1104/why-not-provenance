@@ -1,44 +1,47 @@
-# SQL-Focused Test Plan for WHY-NOT Provenance
+# SQL Test Cases (TPC-C Data) for WHY-NOT Provenance
 
-This document defines **SQL test cases** to evaluate:
+This test plan is aligned with `../TPC_C_export/TPCCReadme.txt` and the provided schema/data files:
 
-1. **Correctness** — does the system return the right WHY-NOT output?
-2. **Completeness** — does it include all relevant failed derivations?
-3. **Informativeness** — are failures explained clearly at goal level?
+- `items(i_id, i_im_id, i_name, i_price)`
+- `warehouses(w_id, w_name, w_street, w_city, w_country)`
+- `stocks(w_id, i_id, s_qty)`
+
+Goal: evaluate
+1. **Correctness**
+2. **Completeness**
+3. **Informativeness** of provenance output.
 
 ---
 
-## How to run
+## 0) One-time DB setup
 
-From `firing_rules/`:
+Load data into PostgreSQL:
 
 ```bash
+psql "$WHY_NOT_DB_CONNECTION" -f ../TPC_C_export/TPCCSchema.sql
+psql "$WHY_NOT_DB_CONNECTION" -f ../TPC_C_export/TPCCItems.sql
+psql "$WHY_NOT_DB_CONNECTION" -f ../TPC_C_export/TPCCWarehouses.sql
+psql "$WHY_NOT_DB_CONNECTION" -f ../TPC_C_export/TPCCStocks.sql
+```
+
+Set env in `firing_rules/.env`:
+
+```env
+WHY_NOT_DB_CONNECTION=postgresql://user:pass@host:5432/db
+```
+
+Run pattern:
+
+```bash
+cd ../firing_rules
 python3 why_not_provenance.py < ../tests/<case>.txt > ../tests/<case>.json
 ```
 
-Quick inspect:
-
-```bash
-jq '.target, .failed_derivation_count, .message' ../tests/<case>.json
-```
-
 ---
 
-## Common expectations for all cases
+## 1) Correctness cases
 
-- Output has `mode = "WHYNOT"`
-- `target` matches the question tuple
-- `failed_derivations[*].status` is always `false`
-- `explanation_graph` contains:
-  - missing tuple node
-  - failed rule nodes
-  - failed goal nodes
-
----
-
-## Case SQL-01: Basic projection + selection
-
-**Purpose:** baseline correctness on simple SQL.
+### SQL-01: Simple selection on warehouses
 
 ```text
 SELECT w.w_id, w.w_street
@@ -48,214 +51,196 @@ WHERE w.w_city = 'Singapore';
 WHYNOT Q(10,'York')
 ```
 
-**Checks**
-- SQL parses successfully
-- Failed goals include grounded predicates/comparisons tied to tuple `(10,'York')`
+Why this is valid: `warehouses` has Singapore rows (e.g., w_id 301, 281, 22, 1004, 3), so `(10,'York')` is a plausible missing tuple.
+
+Checks:
+- Output is WHYNOT for `Q(10, York)`
+- Failed goals are grounded (`warehouses(...)`, comparison goals)
 
 ---
 
-## Case SQL-02: Inner join missing match
-
-**Purpose:** correctness of join failure explanation.
+### SQL-02: Selection that should succeed for an existing tuple (sanity)
 
 ```text
-SELECT t1.src, t2.dst
-FROM Train t1
-JOIN Train t2 ON t1.dst = t2.src;
+SELECT w.w_id, w.w_street
+FROM warehouses w
+WHERE w.w_city = 'Singapore';
 
-WHYNOT Q(s,n)
+WHYNOT Q(301,'Sunbrook')
 ```
 
-**Checks**
-- Failed derivations explain missing join path
-- Goal-level failures indicate which join-side fact is missing
+Checks:
+- Should not produce a misleading missing-data narrative
+- If failures are returned, verify they are not contradicting existing tuple membership logic
 
 ---
 
-## Case SQL-03: Join + filter
-
-**Purpose:** distinguish join failure vs filter failure.
+### SQL-03: Join stocks + items (existing combo)
 
 ```text
-SELECT c.c_id, o.o_id
-FROM customers c
-JOIN orders o ON c.c_id = o.c_id
-WHERE o.status = 'PAID';
+SELECT s.w_id, s.i_id
+FROM stocks s
+JOIN items i ON s.i_id = i.i_id
+WHERE i.i_price > 90;
 
-WHYNOT Q(1,500)
+WHYNOT Q(301,1)
 ```
 
-**Checks**
-- If join exists but status mismatches, provenance should show comparison failure
-- If join does not exist, provenance should show failed positive atom goal
+From provided data: item `1` has price `95.23` and stock `(301,1,338)` exists.
+
+Checks:
+- Provenance should reflect whether tuple is present under query semantics
+- No incorrect failed-goal explanation for clearly satisfiable join
 
 ---
 
-## Case SQL-04: NOT EXISTS anti-join
-
-**Purpose:** validate negation handling in SQL translation.
+### SQL-04: Join + filter missing by predicate
 
 ```text
-SELECT t1.src, t2.dst
-FROM Train t1 JOIN Train t2 ON t1.dst = t2.src
+SELECT s.w_id, s.i_id
+FROM stocks s
+JOIN items i ON s.i_id = i.i_id
+WHERE i.i_price > 99;
+
+WHYNOT Q(301,1)
+```
+
+Item 1 price is `95.23`, so price predicate should fail.
+
+Checks:
+- Failure should point to grounded comparison (e.g., `95.23 > 99` false)
+
+---
+
+### SQL-05: NOT EXISTS anti-join on stocks
+
+```text
+SELECT w.w_id, i.i_id
+FROM warehouses w JOIN items i ON i.i_id = 1
 WHERE NOT EXISTS (
-  SELECT 1 FROM Train t3
-  WHERE t3.src = t1.src AND t3.dst = t2.dst
+  SELECT 1 FROM stocks s
+  WHERE s.w_id = w.w_id AND s.i_id = i.i_id
 );
 
-WHYNOT Q(n,s)
+WHYNOT Q(301,1)
 ```
 
-**Checks**
-- Failed goals should explicitly include grounded `not ...` goal outcome
-- Explanation should tell whether tuple is excluded because anti-join condition failed
+Stock `(301,1)` exists, so anti-join should exclude it.
+
+Checks:
+- Failed provenance should clearly indicate why NOT EXISTS condition fails
+- Negated goal should appear grounded
 
 ---
 
-## Case SQL-05: Multiple SQL blocks
+## 2) Completeness cases
 
-**Purpose:** completeness across multiple generated SQL rules.
+### SQL-06: Multi-join with multiple candidate failures
+
+```text
+SELECT w.w_id, i.i_id
+FROM warehouses w
+JOIN stocks s ON s.w_id = w.w_id
+JOIN items i ON i.i_id = s.i_id
+WHERE w.w_city = 'Singapore' AND i.i_price > 95;
+
+WHYNOT Q(22,10)
+```
+
+Checks:
+- Relevant failed derivations are all captured (under active binding strategy)
+- Failures may come from city condition, join linkage, or price filter
+
+---
+
+### SQL-07: Multiple SQL blocks (deterministic handling)
 
 ```text
 SELECT w.w_id, w.w_street
 FROM warehouses w
-WHERE w.w_city = 'Singapore';
+WHERE w.w_country = 'Singapore';
 
 SELECT w.w_id, w.w_street
 FROM warehouses w
-WHERE w.w_city = 'Tokyo';
+WHERE w.w_country = 'Malaysia';
 
-WHYNOT Q(10,'York')
+WHYNOT Q(1,'Green')
 ```
 
-**Checks**
-- Engine handles multiple SQL blocks deterministically
-- Relevant failed derivations are not dropped
+Checks:
+- Engine handles both SQL blocks without dropping relevant failures
+- Results deterministic across repeated runs
 
 ---
 
-## Case SQL-06: Column alias handling
+## 3) Informativeness cases
 
-**Purpose:** correctness of alias/column resolution.
+### SQL-08: Goal-level readability
 
 ```text
-SELECT w.w_id AS id, w.w_street AS street
-FROM warehouses AS w
-WHERE w.w_city = 'Singapore';
+SELECT s.w_id, s.i_id
+FROM stocks s
+JOIN items i ON s.i_id = i.i_id
+WHERE i.i_price < 5;
 
-WHYNOT Q(10,'York')
+WHYNOT Q(301,1)
 ```
 
-**Checks**
-- SQL aliasing is resolved correctly
-- Same logical result as non-aliased query
+Checks:
+- `failed_derivations[*].goal_results` includes grounded, human-readable goals
+- Explanation graph has tuple -> failed rule -> failed goals edges
 
 ---
 
-## Case SQL-07: Numeric comparison predicates
-
-**Purpose:** correctness of comparison operators.
-
-```text
-SELECT i.item_id, i.price
-FROM items i
-WHERE i.price > 100;
-
-WHYNOT Q(7,80)
-```
-
-**Checks**
-- Failed comparison goal is grounded (e.g., `80 > 100` false)
-
----
-
-## Case SQL-08: String literal quoting
-
-**Purpose:** robust handling of quoted constants.
+### SQL-09: String literal handling
 
 ```text
 SELECT w.w_id, w.w_city
 FROM warehouses w
-WHERE w.w_city = 'New York';
+WHERE w.w_country = 'Singapore';
 
-WHYNOT Q(3,'New York')
+WHYNOT Q(1,'Patemon')
 ```
 
-**Checks**
-- Literal parsing is correct
-- No malformed atom/goal from spaces in string
+Checks:
+- String constants parsed correctly
+- Explanation clearly identifies failing condition (`w_country = Singapore`)
 
 ---
 
-## Case SQL-09: Backend connection via `.env`
+## 4) Concurrency and stability
 
-**Purpose:** integration correctness with PostgreSQL mode.
-
-`.env`:
-
-```text
-WHY_NOT_DB_CONNECTION=postgresql://user:pass@host:5432/db
-```
-
-Input:
-
-```text
-SELECT w.w_id, w.w_street
-FROM warehouses w
-WHERE w.w_city='Singapore';
-
-WHYNOT Q(10,'York')
-```
-
-**Checks**
-- Runs without inline `CONNECTION:` directive
-- `query_results` is populated
-
----
-
-## Case SQL-10: Concurrency consistency
-
-**Purpose:** ensure thread-safe deterministic output.
-
-Run same SQL case with:
+Use one stable case (e.g., SQL-01) and run with different workers:
 
 ```bash
-WHY_NOT_MAX_WORKERS=1 python3 why_not_provenance.py < ../tests/sql-02.txt > out1.json
-WHY_NOT_MAX_WORKERS=4 python3 why_not_provenance.py < ../tests/sql-02.txt > out4.json
-WHY_NOT_MAX_WORKERS=8 python3 why_not_provenance.py < ../tests/sql-02.txt > out8.json
+WHY_NOT_MAX_WORKERS=1 python3 why_not_provenance.py < ../tests/sql-01.txt > /tmp/out1.json
+WHY_NOT_MAX_WORKERS=4 python3 why_not_provenance.py < ../tests/sql-01.txt > /tmp/out4.json
+WHY_NOT_MAX_WORKERS=8 python3 why_not_provenance.py < ../tests/sql-01.txt > /tmp/out8.json
 ```
 
-**Checks**
+Checks:
 - Same `failed_derivation_count`
 - Same logical failed derivations
-- No race-related corruption in `binding` / `goal_results`
+- No malformed bindings/goal results (thread-safety signal)
 
 ---
 
-## Evaluating provenance quality
+## 5) Suggested scoring rubric
 
 For each case, score 0–2:
 
-- **Correctness**
-  - 0: wrong/missing result
-  - 1: partially right
-  - 2: correct
+- **Correctness**: wrong (0), partial (1), correct (2)
+- **Completeness**: missing relevant failures (0), partial (1), complete (2)
+- **Informativeness**: vague (0), somewhat useful (1), clear/actionable (2)
 
-- **Completeness**
-  - 0: relevant failures missing
-  - 1: partial coverage
-  - 2: complete coverage under active binding strategy
-
-- **Informativeness**
-  - 0: vague
-  - 1: somewhat useful
-  - 2: clear, grounded, actionable
-
-Total score = sum across chosen cases.
+Total score = sum across selected cases.
 
 ---
 
 ## Notes
 
-- If join-driven binding is active, exhaustive Cartesian-style hypothetical failures may be reduced.
-- When comparing completeness, keep binding strategy and worker count fixed.
+- Keep comparison settings fixed when evaluating completeness:
+  - same dataset
+  - same worker count
+  - same binding strategy (join-driven vs exhaustive)
+- Current engine supports a practical SQL subset; avoid aggregates/OR/complex nesting in benchmark cases.

@@ -1,0 +1,6 @@
+SELECT s.w_id, s.i_id
+FROM stocks s
+JOIN items i ON s.i_id = i.i_id
+WHERE i.i_price > 90;
+
+WHYNOT Q(301,1)

@@ -155,16 +155,40 @@ EOF
 
 ---
 
-## Output fields
+## Output JSON attributes
 
-Top-level JSON includes:
-- `mode`
-- `target`
-- `failed_derivation_count`
-- `failed_derivations`
-- `explanation_graph`
-- `query_results` (non-empty when SQL blocks are executed via backend)
-- `message`
+The engine returns a JSON object with these top-level attributes:
+
+- `mode` (`string`)
+  - Currently always `"WHYNOT"`.
+
+- `target` (`string`)
+  - The grounded target tuple from the provenance question, e.g. `"Q(s, n)"`.
+
+- `failed_derivation_count` (`number`)
+  - Count of relevant failed derivations for the target tuple.
+
+- `failed_derivations` (`array`)
+  - Detailed failed derivation records. Each record contains:
+    - `rule_id` (`string`): rule that was evaluated
+    - `binding` (`object`): variable assignment used in this derivation (e.g. `{ "X": "s", "Y": "n", "Z": "c" }`)
+    - `goal_results` (`array`): per-goal evaluation results:
+      - `goal_index` (`number`): position in rule body
+      - `goal` (`string`): grounded goal text (e.g. `"Train(s, c)"`)
+      - `ok` (`boolean`): whether this goal succeeded
+    - `status` (`boolean`): overall derivation success; for this list it is always `false`
+
+- `explanation_graph` (`object`)
+  - Graph form of the explanation with:
+    - `nodes` (`array`): tuple/rule/goal nodes
+    - `edges` (`array`): directed links (tuple -> failed rule -> failed goals)
+
+- `query_results` (`array`)
+  - Raw SQL execution payloads from PostgreSQL-backed mode.
+  - Empty for pure Datalog-only input.
+
+- `message` (`string`)
+  - Human-readable summary of the result.
 
 ---
 
