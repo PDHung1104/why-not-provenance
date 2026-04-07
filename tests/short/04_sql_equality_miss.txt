@@ -1,0 +1,9 @@
+SCHEMA Base(v).
+
+Base(c).
+
+SELECT b.v
+FROM Base b
+WHERE b.v = 'a';
+
+WHYNOT Q(c)

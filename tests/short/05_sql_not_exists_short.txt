@@ -1,0 +1,16 @@
+SCHEMA warehouses(w_id,w_city).
+SCHEMA items(i_id).
+SCHEMA stocks(w_id,i_id).
+
+warehouses(1,SG).
+items(1).
+stocks(1,1).
+
+SELECT w.w_id, i.i_id
+FROM warehouses w JOIN items i ON i.i_id = 1
+WHERE NOT EXISTS (
+  SELECT 1 FROM stocks s
+  WHERE s.w_id = w.w_id AND s.i_id = i.i_id
+);
+
+WHYNOT Q(1,1)

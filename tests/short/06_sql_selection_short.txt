@@ -1,0 +1,10 @@
+SCHEMA warehouses(w_id,w_city,w_street).
+
+warehouses(1,SG,Sunbrook).
+warehouses(2,MY,York).
+
+SELECT w.w_id, w.w_street
+FROM warehouses w
+WHERE w.w_city = 'SG';
+
+WHYNOT Q(2,York)
