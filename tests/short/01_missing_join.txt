@@ -1,0 +1,15 @@
+SCHEMA Train(src,dst).
+
+Train(n,n).
+Train(n,c).
+Train(c,n).
+
+SELECT t1.src, t2.dst
+FROM Train t1
+JOIN Train t2 ON t1.dst = t2.src
+WHERE NOT EXISTS (
+  SELECT 1 FROM Train t3
+  WHERE t3.src = t1.src AND t3.dst = t2.dst
+);
+
+WHYNOT Q(n,n)

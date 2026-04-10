@@ -1,0 +1,15 @@
+SCHEMA Edge(src,dst).
+
+Edge(a,b).
+Edge(b,c).
+Edge(a,c).
+
+SELECT e1.src, e2.dst
+FROM Edge e1
+JOIN Edge e2 ON e1.dst = e2.src
+WHERE NOT EXISTS (
+  SELECT 1 FROM Edge e3
+  WHERE e3.src = e1.src AND e3.dst = e2.dst
+);
+
+WHYNOT Q(a,c)

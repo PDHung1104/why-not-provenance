@@ -1,0 +1,11 @@
+SCHEMA Num(x).
+
+Num(1).
+Num(2).
+Num(3).
+
+SELECT n.x
+FROM Num n
+WHERE n.x > 2;
+
+WHYNOT Q(2)
